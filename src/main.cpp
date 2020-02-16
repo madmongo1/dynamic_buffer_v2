@@ -10,11 +10,11 @@
 namespace program
 {
 template < class Iterator >
-struct vv_dyn_buf_state
+struct cobc_dynamic_buffer_state
 {
     using value_type = typename Iterator::value_type;
 
-    vv_dyn_buf_state(Iterator first, Iterator last)
+    cobc_dynamic_buffer_state(Iterator first, Iterator last)
     : first_element_(first)
     , last_element_(last)
     , initial_discount_(0)
@@ -144,7 +144,7 @@ struct vv_dyn_buf_state
 };
 
 template < class StorageIterator, class IsConst >
-struct vv_dyn_buf_iterator
+struct cobc_dynamic_buffer_iterator
 {
     struct iterator_category : std::bidirectional_iterator_tag
     {
@@ -154,9 +154,9 @@ struct vv_dyn_buf_iterator
     using reference       = value_type const &;
     using pointer         = value_type const *;
     using difference_type = std::ptrdiff_t;
-    using state_type      = vv_dyn_buf_state< StorageIterator >;
+    using state_type      = cobc_dynamic_buffer_state< StorageIterator >;
 
-    vv_dyn_buf_iterator(state_type const *state = nullptr, std::size_t index = 0)
+    cobc_dynamic_buffer_iterator(state_type const *state = nullptr, std::size_t index = 0)
     : state_(state)
     , index_(index)
     , data_view_()
@@ -164,7 +164,7 @@ struct vv_dyn_buf_iterator
     }
 
     template < class OtherStorageIterator, class IsOtherConst >
-    friend struct vv_dyn_buf_iterator;
+    friend struct cobc_dynamic_buffer_iterator;
 
     value_type operator*() const
     {
@@ -172,26 +172,26 @@ struct vv_dyn_buf_iterator
         return state_->build_buffer(index_);
     }
 
-    auto operator++() -> vv_dyn_buf_iterator &
+    auto operator++() -> cobc_dynamic_buffer_iterator &
     {
         ++index_;
         return *this;
     }
 
-    auto operator++(int) -> vv_dyn_buf_iterator
+    auto operator++(int) -> cobc_dynamic_buffer_iterator
     {
         auto result = *this;
         ++(*this);
         return result;
     }
 
-    auto operator--() -> vv_dyn_buf_iterator &
+    auto operator--() -> cobc_dynamic_buffer_iterator &
     {
         --index_;
         return *this;
     }
 
-    auto operator--(int) -> vv_dyn_buf_iterator
+    auto operator--(int) -> cobc_dynamic_buffer_iterator
     {
         auto result = *this;
         --(*this);
@@ -200,7 +200,8 @@ struct vv_dyn_buf_iterator
 
   private:
     template < class AI, class AB, class BI, class BB >
-    friend auto operator==(vv_dyn_buf_iterator< AI, AB > const &a, vv_dyn_buf_iterator< BI, BB > const &b);
+    friend auto operator==(cobc_dynamic_buffer_iterator< AI, AB > const &a,
+                           cobc_dynamic_buffer_iterator< BI, BB > const &b);
 
     state_type const *state_;
     std::size_t       index_ = 0;
@@ -208,29 +209,29 @@ struct vv_dyn_buf_iterator
 };
 
 template < class AI, class AB, class BI, class BB >
-auto operator==(vv_dyn_buf_iterator< AI, AB > const &a, vv_dyn_buf_iterator< BI, BB > const &b)
+auto operator==(cobc_dynamic_buffer_iterator< AI, AB > const &a, cobc_dynamic_buffer_iterator< BI, BB > const &b)
 {
     return a.index_ == b.index_;
 }
 
 template < class AI, class AB, class BI, class BB >
-auto operator!=(vv_dyn_buf_iterator< AI, AB > const &a, vv_dyn_buf_iterator< BI, BB > const &b)
+auto operator!=(cobc_dynamic_buffer_iterator< AI, AB > const &a, cobc_dynamic_buffer_iterator< BI, BB > const &b)
 {
     return !(a == b);
 }
 
 template < class StoreIterator, class IsConst >
-struct vv_dyn_buf_sequence
+struct cobc_dynamic_buffer_sequence
 {
     using element_type   = typename StoreIterator::value_type;
     using c_element_type = std::conditional_t< IsConst::value, std::add_const_t< element_type >, element_type >;
     using value_type     = std::conditional_t< IsConst::value, net::const_buffer, net::mutable_buffer >;
 
     // we are both an iterator and a sequence
-    using iterator       = vv_dyn_buf_iterator< StoreIterator, IsConst >;
+    using iterator       = cobc_dynamic_buffer_iterator< StoreIterator, IsConst >;
     using const_iterator = iterator;
 
-    vv_dyn_buf_sequence(vv_dyn_buf_state< StoreIterator > state)
+    cobc_dynamic_buffer_sequence(cobc_dynamic_buffer_state< StoreIterator > state)
     : state_(state)
     {
     }
@@ -241,28 +242,29 @@ struct vv_dyn_buf_sequence
 
     auto adjust(std::size_t pos, std::size_t n) -> void { state_.adjust(pos, n); }
 
-    vv_dyn_buf_state< StoreIterator > state_;
+    cobc_dynamic_buffer_state< StoreIterator > state_;
 };
 
 static_assert(net::is_mutable_buffer_sequence<
+              cobc_dynamic_buffer_sequence< std::vector< std::vector< char > >, std::false_type > >::value);
 
-              vv_dyn_buf_sequence< std::vector< std::vector< char > >, std::false_type > >::value);
 static_assert(
-    net::is_const_buffer_sequence< vv_dyn_buf_sequence< std::vector< std::vector< char > >, std::true_type > >::value);
+    net::is_const_buffer_sequence<
+              cobc_dynamic_buffer_sequence< std::vector< std::vector< char > >, std::true_type > >::value);
 
 static_assert(
     std::is_convertible_v<
         decltype(boost::asio::buffer_sequence_begin(
-            std::declval< vv_dyn_buf_sequence< std::vector< std::vector< char > >, std::false_type > >()))::value_type,
+            std::declval< cobc_dynamic_buffer_sequence< std::vector< std::vector< char > >, std::false_type > >()))::value_type,
         boost::asio::mutable_buffer >);
 
 template < class StoreType >
-struct vv_dyn_buf
+struct cobc_dynamic_buffer
 {
     using store_type = StoreType;
-    using state_type = vv_dyn_buf_state< typename store_type::iterator >;
+    using state_type = cobc_dynamic_buffer_state< typename store_type::iterator >;
 
-    vv_dyn_buf(store_type &store, std::size_t max_size = 16 * 1024 * 1024, std::size_t chunk_size = 4096)
+    cobc_dynamic_buffer(store_type &store, std::size_t max_size = 16 * 1024 * 1024, std::size_t chunk_size = 4096)
     : store_(store)
     , impl_(std::make_shared< state_type >(store_.begin(), store_.end()))
     , max_size_((std::max)(max_size, impl_->compute_size()))
@@ -272,8 +274,8 @@ struct vv_dyn_buf
 
     // DynamicBuffer_v2
 
-    using const_buffers_type   = vv_dyn_buf_sequence< typename StoreType::iterator, std::true_type >;
-    using mutable_buffers_type = vv_dyn_buf_sequence< typename StoreType::iterator, std::false_type >;
+    using const_buffers_type   = cobc_dynamic_buffer_sequence< typename StoreType::iterator, std::true_type >;
+    using mutable_buffers_type = cobc_dynamic_buffer_sequence< typename StoreType::iterator, std::false_type >;
 
     auto size() const -> std::size_t { return impl_->compute_size(); }
 
@@ -343,7 +345,7 @@ struct vv_dyn_buf
     const std::size_t             chunk_size_;
 };
 
-static_assert(net::is_dynamic_buffer_v2< vv_dyn_buf< std::vector< std::vector< char > > > >::value);
+static_assert(net::is_dynamic_buffer_v2< cobc_dynamic_buffer< std::vector< std::vector< char > > > >::value);
 
 template < class Container, typename = void >
 struct is_container_of_bytes : std::false_type
@@ -376,9 +378,9 @@ static_assert(is_container_of_container_of_bytes< std::vector< std::vector< char
 
 template < class Container >
 auto dynamic_buffer(Container &store)
-    -> std::enable_if_t< is_container_of_container_of_bytes< Container >::value, vv_dyn_buf< Container > >
+    -> std::enable_if_t< is_container_of_container_of_bytes< Container >::value, cobc_dynamic_buffer< Container > >
 {
-    return vv_dyn_buf< Container >(store);
+    return cobc_dynamic_buffer< Container >(store);
 }
 }   // namespace program
 
