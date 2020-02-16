@@ -3,20 +3,18 @@
 
 #include <iostream>
 #include <memory>
+#include <list>
+#include <vector>
+#include <deque>
 
 namespace program
 {
-struct vv_dyn_buf_traits
+template < class Iterator >
+struct vv_dyn_buf_state
 {
-    using store_type   = std::vector< std::vector< char > >;
-    using element_type = store_type::value_type;
-};
+    using value_type = typename Iterator::value_type;
 
-struct vv_dyn_buf_state : vv_dyn_buf_traits
-{
-    using element_type = std::vector< char >;
-
-    vv_dyn_buf_state(element_type *first, element_type *last)
+    vv_dyn_buf_state(Iterator first, Iterator last)
     : first_element_(first)
     , last_element_(last)
     , initial_discount_(0)
@@ -29,7 +27,7 @@ struct vv_dyn_buf_state : vv_dyn_buf_traits
         if (i >= std::size_t(std::distance(first_element_, last_element_)))
             return net::mutable_buffer();
 
-        auto elem       = first_element_ + i;
+        auto elem       = std::next(first_element_, i);
         auto first_byte = elem->data();
         auto last_byte  = first_byte + elem->size();
         first_byte += initial_discount(elem);
@@ -37,7 +35,7 @@ struct vv_dyn_buf_state : vv_dyn_buf_traits
         return net::mutable_buffer(first_byte, std::size_t(std::distance(first_byte, last_byte)));
     }
 
-    auto initial_discount(element_type *elem) const -> std::size_t
+    auto initial_discount(Iterator elem) const -> std::size_t
     {
         if (elem == first_element_ && elem != last_element_)
             return initial_discount_;
@@ -45,7 +43,7 @@ struct vv_dyn_buf_state : vv_dyn_buf_traits
             return 0;
     }
 
-    auto final_discount(element_type *elem) const -> std::size_t
+    auto final_discount(Iterator elem) const -> std::size_t
     {
         if (elem != last_element_ && std::next(elem) == last_element_)
             return final_discount_;
@@ -73,7 +71,7 @@ struct vv_dyn_buf_state : vv_dyn_buf_traits
             return final_discount_;
     }
 
-    void repoint(element_type *first, element_type *last)
+    void repoint(Iterator first, Iterator last)
     {
         first_element_ = first;
         last_element_  = last;
@@ -108,7 +106,7 @@ struct vv_dyn_buf_state : vv_dyn_buf_traits
     {
         while (n && element_count() != 0)
         {
-            auto current = last_element_ - 1;
+            auto current = std::prev(last_element_);
             auto size    = current->size() - initial_discount(current) - final_discount_;
             auto adj     = std::min(size, n);
             n -= adj;
@@ -139,13 +137,13 @@ struct vv_dyn_buf_state : vv_dyn_buf_traits
         }
     }
 
-    element_type *first_element_;
-    element_type *last_element_;
-    std::size_t   initial_discount_ = 0;
-    std::size_t   final_discount_   = 0;
+    Iterator    first_element_;
+    Iterator    last_element_;
+    std::size_t initial_discount_ = 0;
+    std::size_t final_discount_   = 0;
 };
 
-template < class IsConst >
+template < class StorageIterator, class IsConst >
 struct vv_dyn_buf_iterator
 {
     struct iterator_category : std::bidirectional_iterator_tag
@@ -156,15 +154,16 @@ struct vv_dyn_buf_iterator
     using reference       = value_type const &;
     using pointer         = value_type const *;
     using difference_type = std::ptrdiff_t;
+    using state_type      = vv_dyn_buf_state< StorageIterator >;
 
-    vv_dyn_buf_iterator(vv_dyn_buf_state const *state = nullptr, std::size_t index = 0)
+    vv_dyn_buf_iterator(state_type const *state = nullptr, std::size_t index = 0)
     : state_(state)
     , index_(index)
     , data_view_()
     {
     }
 
-    template < class IsOtherConst >
+    template < class OtherStorageIterator, class IsOtherConst >
     friend struct vv_dyn_buf_iterator;
 
     value_type operator*() const
@@ -200,39 +199,38 @@ struct vv_dyn_buf_iterator
     }
 
   private:
+    template < class AI, class AB, class BI, class BB >
+    friend auto operator==(vv_dyn_buf_iterator< AI, AB > const &a, vv_dyn_buf_iterator< BI, BB > const &b);
 
-    template < class A, class B >
-    friend auto operator==(vv_dyn_buf_iterator< A > const &a, vv_dyn_buf_iterator< B > const &b);
-
-    vv_dyn_buf_state const *state_;
-    std::size_t             index_ = 0;
-    value_type              data_view_;
+    state_type const *state_;
+    std::size_t       index_ = 0;
+    value_type        data_view_;
 };
 
-template < class A, class B >
-auto operator==(vv_dyn_buf_iterator< A > const &a, vv_dyn_buf_iterator< B > const &b)
+template < class AI, class AB, class BI, class BB >
+auto operator==(vv_dyn_buf_iterator< AI, AB > const &a, vv_dyn_buf_iterator< BI, BB > const &b)
 {
     return a.index_ == b.index_;
 }
 
-template < class A, class B >
-auto operator!=(vv_dyn_buf_iterator< A > const &a, vv_dyn_buf_iterator< B > const &b)
+template < class AI, class AB, class BI, class BB >
+auto operator!=(vv_dyn_buf_iterator< AI, AB > const &a, vv_dyn_buf_iterator< BI, BB > const &b)
 {
     return !(a == b);
 }
 
-template < class IsConst >
-struct vv_dyn_buf_sequence : vv_dyn_buf_traits
+template < class StoreIterator, class IsConst >
+struct vv_dyn_buf_sequence
 {
-    using element_type   = std::vector< char >;
+    using element_type   = typename StoreIterator::value_type;
     using c_element_type = std::conditional_t< IsConst::value, std::add_const_t< element_type >, element_type >;
     using value_type     = std::conditional_t< IsConst::value, net::const_buffer, net::mutable_buffer >;
 
     // we are both an iterator and a sequence
-    using iterator       = vv_dyn_buf_iterator< IsConst >;
+    using iterator       = vv_dyn_buf_iterator< StoreIterator, IsConst >;
     using const_iterator = iterator;
 
-    vv_dyn_buf_sequence(vv_dyn_buf_state state)
+    vv_dyn_buf_sequence(vv_dyn_buf_state< StoreIterator > state)
     : state_(state)
     {
     }
@@ -243,21 +241,30 @@ struct vv_dyn_buf_sequence : vv_dyn_buf_traits
 
     auto adjust(std::size_t pos, std::size_t n) -> void { state_.adjust(pos, n); }
 
-    vv_dyn_buf_state state_;
+    vv_dyn_buf_state< StoreIterator > state_;
 };
 
-static_assert(net::is_mutable_buffer_sequence< vv_dyn_buf_sequence< std::false_type > >::value);
-static_assert(net::is_const_buffer_sequence< vv_dyn_buf_sequence< std::true_type > >::value);
+static_assert(net::is_mutable_buffer_sequence<
 
-static_assert(std::is_convertible_v< decltype(boost::asio::buffer_sequence_begin(
-                                         std::declval< vv_dyn_buf_sequence< std::false_type > >()))::value_type,
-                                     boost::asio::mutable_buffer >);
+              vv_dyn_buf_sequence< std::vector< std::vector< char > >, std::false_type > >::value);
+static_assert(
+    net::is_const_buffer_sequence< vv_dyn_buf_sequence< std::vector< std::vector< char > >, std::true_type > >::value);
 
-struct vv_dyn_buf : vv_dyn_buf_traits
+static_assert(
+    std::is_convertible_v<
+        decltype(boost::asio::buffer_sequence_begin(
+            std::declval< vv_dyn_buf_sequence< std::vector< std::vector< char > >, std::false_type > >()))::value_type,
+        boost::asio::mutable_buffer >);
+
+template < class StoreType >
+struct vv_dyn_buf
 {
+    using store_type = StoreType;
+    using state_type = vv_dyn_buf_state< typename store_type::iterator >;
+
     vv_dyn_buf(store_type &store, std::size_t max_size = 16 * 1024 * 1024, std::size_t chunk_size = 4096)
     : store_(store)
-    , impl_(std::make_shared< vv_dyn_buf_state >(store_.data(), store_.data() + store_.size()))
+    , impl_(std::make_shared< state_type >(store_.begin(), store_.end()))
     , max_size_((std::max)(max_size, impl_->compute_size()))
     , chunk_size_(chunk_size)
     {
@@ -265,8 +272,8 @@ struct vv_dyn_buf : vv_dyn_buf_traits
 
     // DynamicBuffer_v2
 
-    using const_buffers_type   = vv_dyn_buf_sequence< std::true_type >;
-    using mutable_buffers_type = vv_dyn_buf_sequence< std::false_type >;
+    using const_buffers_type   = vv_dyn_buf_sequence< typename StoreType::iterator, std::true_type >;
+    using mutable_buffers_type = vv_dyn_buf_sequence< typename StoreType::iterator, std::false_type >;
 
     auto size() const -> std::size_t { return impl_->compute_size(); }
 
@@ -292,7 +299,7 @@ struct vv_dyn_buf : vv_dyn_buf_traits
         return result;
     }
 
-    void repoint() { impl_->repoint(store_.data(), store_.data() + store_.size()); }
+    void repoint() { impl_->repoint(store_.begin(), store_.end()); }
 
     auto grow(std::size_t n) -> void
     {
@@ -330,17 +337,48 @@ struct vv_dyn_buf : vv_dyn_buf_traits
     }
 
   private:
-    store_type &                        store_;
-    std::shared_ptr< vv_dyn_buf_state > impl_;
-    const std::size_t                   max_size_;
-    const std::size_t                   chunk_size_;
+    store_type &                  store_;
+    std::shared_ptr< state_type > impl_;
+    const std::size_t             max_size_;
+    const std::size_t             chunk_size_;
 };
 
-static_assert(net::is_dynamic_buffer_v2< vv_dyn_buf >::value);
+static_assert(net::is_dynamic_buffer_v2< vv_dyn_buf< std::vector< std::vector< char > > > >::value);
 
-auto dynamic_buffer(std::vector< std::vector< char > > &store)
+template < class Container, typename = void >
+struct is_container_of_bytes : std::false_type
 {
-    return vv_dyn_buf(store);
+};
+
+template < class Container >
+struct is_container_of_bytes<
+    Container,
+    std::enable_if_t< sizeof(std::decay_t< decltype(*std::begin(std::declval< Container >())) >) == 1 > >
+: std::true_type
+{
+};
+
+template < class Container, typename = void >
+struct is_container_of_container_of_bytes : std::false_type
+{
+};
+
+template < class Container >
+struct is_container_of_container_of_bytes<
+    Container,
+    std::enable_if_t< is_container_of_bytes< decltype(*std::begin(std::declval< Container >())) >::value > >
+: std::true_type
+{
+};
+
+static_assert(is_container_of_bytes< std::vector< char > >::value);
+static_assert(is_container_of_container_of_bytes< std::vector< std::vector< char > > >::value);
+
+template < class Container >
+auto dynamic_buffer(Container &store)
+    -> std::enable_if_t< is_container_of_container_of_bytes< Container >::value, vv_dyn_buf< Container > >
+{
+    return vv_dyn_buf< Container >(store);
 }
 }   // namespace program
 
@@ -351,9 +389,10 @@ using tcp           = net::ip::tcp;
 
 using namespace std::literals;
 
-auto build_buffers_storage(const char *const *strings) -> std::vector< std::vector< char > >
+template < class StoreType >
+auto build_buffers_storage(const char *const *strings) -> StoreType
 {
-    std::vector< std::vector< char > > result;
+    StoreType result;
 
     while (auto string = *strings++)
     {
@@ -369,16 +408,10 @@ auto build_buffers_storage(const char *const *strings) -> std::vector< std::vect
     return result;
 }
 
-int run()
+template < class StoreType >
+void check_your_privilege(net::executor exec, tcp::resolver::results_type resolved)
 {
-    auto            host = "www.example.com"s, endpoint = "/"s, port = "80"s;
-    net::io_context ioc;
-    auto            exec = ioc.get_executor();
-
-    tcp::resolver resolver { exec };
-
-    const auto resolved = resolver.resolve(host, port);
-    auto       sock     = tcp::socket(exec);
+    auto sock = tcp::socket(exec);
 
     boost::asio::connect(sock, resolved);
 
@@ -386,7 +419,7 @@ int run()
         "GET / HTTP/1.1", "Host: example.com", "User-Agent: curl/7.66.0", "Accept: */*", "", nullptr
     };
 
-    auto storage = build_buffers_storage(request_texts);
+    auto storage = build_buffers_storage< StoreType >(request_texts);
     {
         const auto wb = dynamic_buffer(storage);
         net::write(sock, wb.data(0, wb.size()));
@@ -411,6 +444,20 @@ int run()
 
     sock.shutdown(tcp::socket::shutdown_receive, ec);
     sock.close();
+}
+
+int run()
+{
+    auto            host = "www.example.com"s, endpoint = "/"s, port = "80"s;
+    net::io_context ioc;
+    auto            exec = ioc.get_executor();
+
+    tcp::resolver resolver { exec };
+
+    const auto resolved = resolver.resolve(host, port);
+    check_your_privilege< std::vector< std::vector< char > > >(exec, resolved);
+    check_your_privilege< std::deque< std::vector< char > > >(exec, resolved);
+    check_your_privilege< std::list< std::vector< char > > >(exec, resolved);
 
     return 0;
 }
