@@ -331,7 +331,7 @@ struct vv_dyn_buf : vv_dyn_buf_traits
         // need to allocate another block?
         if (n)
         {
-            auto chunk_size = std::max(std::size_t(512), n);
+            auto chunk_size = std::max(std::size_t(chunk_size_), n);
             store_.emplace_back(chunk_size);
             repoint();
             impl_->final_discount_ = chunk_size - n;
