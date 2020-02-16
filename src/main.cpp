@@ -162,19 +162,20 @@ struct vv_dyn_buf_iterator
     , index_(index)
     , data_view_()
     {
-        if (state_)
-            refresh_view();
     }
 
     template < class IsOtherConst >
     friend struct vv_dyn_buf_iterator;
 
-    reference operator*() const { return data_view_; }
+    value_type operator*() const
+    {
+        BOOST_ASSERT(state_);
+        return state_->build_buffer(index_);
+    }
 
     auto operator++() -> vv_dyn_buf_iterator &
     {
         ++index_;
-        refresh_view();
         return *this;
     }
 
@@ -188,7 +189,6 @@ struct vv_dyn_buf_iterator
     auto operator--() -> vv_dyn_buf_iterator &
     {
         --index_;
-        refresh_view();
         return *this;
     }
 
@@ -200,11 +200,6 @@ struct vv_dyn_buf_iterator
     }
 
   private:
-    auto refresh_view() -> void
-    {
-        BOOST_ASSERT(state_);
-        data_view_ = state_->build_buffer(index_);
-    }
 
     template < class A, class B >
     friend auto operator==(vv_dyn_buf_iterator< A > const &a, vv_dyn_buf_iterator< B > const &b);
