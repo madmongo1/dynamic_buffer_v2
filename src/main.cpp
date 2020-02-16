@@ -249,31 +249,6 @@ struct vv_dyn_buf_sequence : vv_dyn_buf_traits
 static_assert(net::is_mutable_buffer_sequence< vv_dyn_buf_sequence< std::false_type > >::value);
 static_assert(net::is_const_buffer_sequence< vv_dyn_buf_sequence< std::true_type > >::value);
 
-}   // namespace program
-
-namespace boost
-{
-namespace asio
-{
-template < class IsConst >
-auto buffer_sequence_begin(program::vv_dyn_buf_sequence< IsConst > const &dyn_buf) ->
-    typename program::vv_dyn_buf_sequence< IsConst >::iterator
-{
-    return dyn_buf.begin();
-}
-
-template < class IsConst >
-auto buffer_sequence_end(program::vv_dyn_buf_sequence< IsConst > const &dyn_buf) ->
-    typename program::vv_dyn_buf_sequence< IsConst >::iterator
-{
-    return dyn_buf.end();
-}
-
-}   // namespace asio
-}   // namespace boost
-
-namespace program
-{
 static_assert(std::is_convertible_v< decltype(boost::asio::buffer_sequence_begin(
                                          std::declval< vv_dyn_buf_sequence< std::false_type > >()))::value_type,
                                      boost::asio::mutable_buffer >);
