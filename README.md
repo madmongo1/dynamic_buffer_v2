@@ -1,14 +1,13 @@
-# beast-softphone-problem
+# dynamic_buffer_v2
 
 ## Intention
 
-To recreate the problem reported here:
-
-https://github.com/boostorg/beast/issues/1798
+Proof of concept implementing DynamicBuffer_v2
+for containers of containers of bytes
 
 ## Required toolchain
 
-This program requires a c++11 or better toolchain.
+This program requires a c++17 or better toolchain.
 
 Some very good toolchains files available here:
 
@@ -23,3 +22,4 @@ Where:
 * `POLLY_DIR` is the cloned polly repo
 * `SRC_DIR` is the directory containing this file
 * `BUILD_DIR` is the intended build directory (in-source builds are evil)
+
