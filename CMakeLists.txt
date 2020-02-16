@@ -3,11 +3,11 @@ cmake_minimum_required(VERSION 3.15)
 include(cmake/HunterGate.cmake)
 
 HunterGate(
-        URL "https://github.com/cpp-pm/hunter/archive/v0.23.240.tar.gz"
-        SHA1 "ca19f3769e6c80cfdd19d8b12ba5102c27b074e0"
+        URL "https://github.com/cpp-pm/hunter/archive/v0.23.248.tar.gz"
+        SHA1 "a637ec52a1b82beb5f55ab4aa75fac30bcee8904"
 )
 
-project(BestSoftphoneProblem)
+project(DynamicBufferV2)
 
 hunter_add_package(Boost COMPONENTS system)
 hunter_add_package(OpenSSL)
