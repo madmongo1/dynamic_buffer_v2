@@ -263,8 +263,6 @@ struct cobc_state
     Iterator    first_element_;
     Iterator    last_element_;
     std::size_t initial_discount_;
-
-  public:
     std::size_t final_discount_;
 };
 
