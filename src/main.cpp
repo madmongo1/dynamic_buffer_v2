@@ -4,21 +4,63 @@
 #include <boost/core/typeinfo.hpp>
 #include <deque>
 #include <iostream>
+#include <iterator>
 #include <list>
 #include <memory>
 #include <vector>
 
 namespace program
 {
+namespace detail
+{
+template < class Container, typename = void >
+struct is_container_of_bytes : std::false_type
+{
+};
+
+template < class Container >
+struct is_container_of_bytes<
+    Container,
+    std::enable_if_t< sizeof(std::decay_t< decltype(
+                                 *(std::declval< Container >().data())) >) ==
+                      1 > > : std::true_type
+{
+};
+
+static_assert(is_container_of_bytes< std::vector< char > >::value);
+static_assert(!is_container_of_bytes< std::list< char > >::value);
+
+template < class Container, typename = void >
+struct is_container_of_container_of_bytes : std::false_type
+{
+};
+
+template < class Container >
+struct is_container_of_container_of_bytes<
+    Container,
+    std::enable_if_t< is_container_of_bytes< decltype(
+        *std::begin(std::declval< Container >())) >::value > > : std::true_type
+{
+};
+
+static_assert(is_container_of_container_of_bytes<
+              std::vector< std::vector< char > > >::value);
+}   // namespace detail
+
 /// Hold the current state of either a dynamic buffer or a dynamic_buffer
 /// subsequence.
 /// \tparam Iterator A type of iterator who's value type will be a
 ///                  contiguous byte container
+/// \note This class could be further refactored into 2 - state and dyn_buffer
+/// state, which could then maintain a chached size_. This would speed up
+/// grow() operations a teeny bit because we could track the size rather than
+/// having to compute it
 template < class Iterator >
 struct cobc_state
 {
     /// The type of sequence of bytes being pointed to by the Iterator
-    using value_type = typename Iterator::value_type;
+    using value_type = typename std::iterator_traits< Iterator >::value_type;
+    static_assert(detail::is_container_of_bytes< value_type >::value);
 
     /// Constructor.
     ///
@@ -194,7 +236,7 @@ struct cobc_state
         }
     }
 
-    template<class AddChunk>
+    template < class AddChunk >
     void grow(std::size_t n, AddChunk add_chunk)
     {
         auto avail = std::min(available(), n);
@@ -208,16 +250,14 @@ struct cobc_state
             if (chunk_size >= n)
             {
                 final_discount_ = chunk_size - n;
-                n = 0;
+                n               = 0;
             }
             else
             {
-                n-= chunk_size;
+                n -= chunk_size;
             }
         }
-
     }
-
 
   private:
     Iterator    first_element_;
@@ -332,12 +372,15 @@ auto operator!=(cobc_iterator< AI, AB > const &a,
 }
 
 /// Describe a subrange of a dynamic_buffer
-/// \tparam StoreIterator
+/// \tparam StoreIterator is an iterator who's value type yields a container of
+///                       contiguous bytes
 /// \tparam IsConst
 template < class StoreIterator, class IsConst >
 struct cobc_subrange
 {
-    using element_type   = typename StoreIterator::value_type;
+    using element_type =
+        typename std::iterator_traits< StoreIterator >::value_type;
+    static_assert(detail::is_container_of_bytes< element_type >::value);
     using c_element_type = std::conditional_t< IsConst::value,
                                                std::add_const_t< element_type >,
                                                element_type >;
@@ -372,18 +415,19 @@ struct cobc_subrange
 };
 
 static_assert(net::is_mutable_buffer_sequence<
-              cobc_subrange< std::vector< std::vector< char > >,
+              cobc_subrange< std::vector< std::vector< char > >::iterator,
                              std::false_type > >::value);
 
 static_assert(net::is_const_buffer_sequence<
-              cobc_subrange< std::vector< std::vector< char > >,
+              cobc_subrange< std::vector< std::vector< char > >::iterator,
                              std::true_type > >::value);
 
 static_assert(
     std::is_convertible_v<
-        decltype(boost::asio::buffer_sequence_begin(
-            std::declval< cobc_subrange< std::vector< std::vector< char > >,
-                                         std::false_type > >()))::value_type,
+        std::iterator_traits< decltype(boost::asio::buffer_sequence_begin(
+            std::declval<
+                cobc_subrange< std::vector< std::vector< char > >::iterator,
+                               std::false_type > >())) >::value_type,
         boost::asio::mutable_buffer >);
 
 template < class StoreType >
@@ -446,7 +490,7 @@ struct cobc_dynamic_buffer
         if (n + size() > max_size())
             throw std::length_error("grow");
 
-        impl_->grow(n, [this](std::size_t required){
+        impl_->grow(n, [this](std::size_t required) {
             auto chunk_size = std::max(std::size_t(chunk_size_), required);
             store_.emplace_back(chunk_size);
             repoint();
@@ -481,43 +525,15 @@ static_assert(
     net::is_dynamic_buffer_v2<
         cobc_dynamic_buffer< std::vector< std::vector< char > > > >::value);
 
-template < class Container, typename = void >
-struct is_container_of_bytes : std::false_type
-{
-};
-
 template < class Container >
-struct is_container_of_bytes<
-    Container,
-    std::enable_if_t< sizeof(std::decay_t< decltype(*std::begin(
-                                 std::declval< Container >())) >) == 1 > >
-: std::true_type
+auto dynamic_buffer(Container & store,
+                    std::size_t max_size   = 16 * 1024 * 1024,
+                    std::size_t chunk_size = 4096)
+    -> std::enable_if_t<
+        detail::is_container_of_container_of_bytes< Container >::value,
+        cobc_dynamic_buffer< Container > >
 {
-};
-
-template < class Container, typename = void >
-struct is_container_of_container_of_bytes : std::false_type
-{
-};
-
-template < class Container >
-struct is_container_of_container_of_bytes<
-    Container,
-    std::enable_if_t< is_container_of_bytes< decltype(
-        *std::begin(std::declval< Container >())) >::value > > : std::true_type
-{
-};
-
-static_assert(is_container_of_bytes< std::vector< char > >::value);
-static_assert(is_container_of_container_of_bytes<
-              std::vector< std::vector< char > > >::value);
-
-template < class Container >
-auto dynamic_buffer(Container &store)
-    -> std::enable_if_t< is_container_of_container_of_bytes< Container >::value,
-                         cobc_dynamic_buffer< Container > >
-{
-    return cobc_dynamic_buffer< Container >(store);
+    return cobc_dynamic_buffer< Container >(store, max_size, chunk_size);
 }
 
 // =============
