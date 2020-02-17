@@ -34,17 +34,17 @@ struct cobc_state
     {
     }
 
-    /// Given an index i, return a net::mutable_buffer representing the
+    auto first_element() const -> Iterator { return first_element_; }
+
+    auto last_element() const -> Iterator { return last_element_; }
+
+    /// Given an element iterator, return a net::mutable_buffer representing the
     /// addressable bytes held in element *std::next(first_element_, i)
     /// modulo the conditional discounts
-    /// \param i
+    /// \param elem
     /// \return net::mutable_buffer
-    auto build_buffer(std::size_t i) const -> net::mutable_buffer
+    auto build_buffer(Iterator elem) const -> net::mutable_buffer
     {
-        if (i >= std::size_t(std::distance(first_element_, last_element_)))
-            return net::mutable_buffer();
-
-        auto elem       = std::next(first_element_, i);
         auto first_byte = elem->data();
         auto last_byte  = first_byte + elem->size() - final_discount(elem);
         first_byte += initial_discount(elem);
@@ -135,13 +135,13 @@ struct cobc_state
     auto adjust(std::size_t pos, std::size_t n) -> void
     {
         consume(pos, [this] {
-            ++first_element_;
+            first_element_ = std::next(first_element_);
             rationalise();
         });
         auto size = compute_size();
         n         = std::min(n, size);
         shrink(size - n, [this] {
-            --last_element_;
+            last_element_ = std::prev(last_element_);
             rationalise();
         });
     }
@@ -194,10 +194,38 @@ struct cobc_state
         }
     }
 
+    template<class AddChunk>
+    void grow(std::size_t n, AddChunk add_chunk)
+    {
+        auto avail = std::min(available(), n);
+        final_discount_ -= avail;
+        n -= avail;
+
+        // need to allocate another block?
+        while (n)
+        {
+            auto chunk_size = add_chunk(n);
+            if (chunk_size >= n)
+            {
+                final_discount_ = chunk_size - n;
+                n = 0;
+            }
+            else
+            {
+                n-= chunk_size;
+            }
+        }
+
+    }
+
+
+  private:
     Iterator    first_element_;
     Iterator    last_element_;
-    std::size_t initial_discount_ = 0;
-    std::size_t final_discount_   = 0;
+    std::size_t initial_discount_;
+
+  public:
+    std::size_t final_discount_;
 };
 
 /// An bidrectional (optionally random access) iterator which produces either a
@@ -225,11 +253,15 @@ struct cobc_iterator
     /// \param index current element position may be 0 to state->element_count()
     /// \note also serves as default constructor in order to satisfy
     ///       DefaultConstructible
-    explicit cobc_iterator(state_type const *state = nullptr,
-                           std::size_t       index = 0)
+    explicit cobc_iterator()
+    : state_(nullptr)
+    , index_(StorageIterator())
+    {
+    }
+
+    explicit cobc_iterator(state_type const *state, StorageIterator index)
     : state_(state)
     , index_(index)
-    , data_view_()
     {
     }
 
@@ -249,7 +281,7 @@ struct cobc_iterator
     /// Pre-increment
     auto operator++() -> cobc_iterator &
     {
-        ++index_;
+        index_ = std::next(index_);
         return *this;
     }
 
@@ -264,7 +296,7 @@ struct cobc_iterator
     /// Pre-decrement
     auto operator--() -> cobc_iterator &
     {
-        --index_;
+        index_ = std::prev(index_);
         return *this;
     }
 
@@ -282,8 +314,7 @@ struct cobc_iterator
                            cobc_iterator< BI, BB > const &b);
 
     state_type const *state_;
-    std::size_t       index_ = 0;
-    value_type        data_view_;
+    StorageIterator   index_;
 };
 
 template < class AI, class AB, class BI, class BB >
@@ -322,11 +353,14 @@ struct cobc_subrange
     {
     }
 
-    iterator begin() const { return iterator(std::addressof(state_), 0); }
+    iterator begin() const
+    {
+        return iterator(std::addressof(state_), state_.first_element());
+    }
 
     iterator end() const
     {
-        return iterator(std::addressof(state_), state_.element_count());
+        return iterator(std::addressof(state_), state_.last_element());
     }
 
     auto adjust(std::size_t pos, std::size_t n) -> void
@@ -412,18 +446,12 @@ struct cobc_dynamic_buffer
         if (n + size() > max_size())
             throw std::length_error("grow");
 
-        auto avail = std::min(impl_->available(), n);
-        impl_->final_discount_ -= avail;
-        n -= avail;
-
-        // need to allocate another block?
-        if (n)
-        {
-            auto chunk_size = std::max(std::size_t(chunk_size_), n);
+        impl_->grow(n, [this](std::size_t required){
+            auto chunk_size = std::max(std::size_t(chunk_size_), required);
             store_.emplace_back(chunk_size);
             repoint();
-            impl_->final_discount_ = chunk_size - n;
-        }
+            return chunk_size;
+        });
     }
 
     auto shrink(std::size_t n) -> void
@@ -491,13 +519,12 @@ auto dynamic_buffer(Container &store)
 {
     return cobc_dynamic_buffer< Container >(store);
 }
-}   // namespace program
 
-namespace program
-{
-namespace websocket = beast::websocket;
-using tcp           = net::ip::tcp;
+// =============
+// start of test
+// =============
 
+using tcp = net::ip::tcp;
 using namespace std::literals;
 
 template < class StoreType >
